@@ -1,8 +1,7 @@
-import { ReactNode } from "react";
-import { Navigate, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
-
-type Role = "student" | "employer" | "institute" | null;
+import { ReactNode } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
+import { useAuth, Role } from '../context/AuthContext';
+import { PageLoader } from './LoadingSpinner';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -10,13 +9,20 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { isAuthenticated, role } = useAuth();
+  const { isAuthenticated, isLoading, role } = useAuth();
   const location = useLocation();
 
+  // Show loading while checking auth
+  if (isLoading) {
+    return <PageLoader label="Checking authentication..." />;
+  }
+
+  // Redirect to login if not authenticated
   if (!isAuthenticated) {
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
+  // Check role access
   if (role && !allowedRoles.includes(role)) {
     return <Navigate to="/unauthorized" replace />;
   }
@@ -24,3 +30,4 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   return <>{children}</>;
 }
 
+export default ProtectedRoute;

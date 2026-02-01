@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import axios from "axios";
+import { useToast } from "../context/ToastContext";
+import api, { ApiError } from "../lib/api";
 import { COLLEGES, STREAMS, STREAM_SKILLS_MAPPING, LANGUAGES } from "../data/profileData";
 
 // --- Reusable Components ---
@@ -865,8 +866,9 @@ const Step4 = ({ formData, setFormData, handleResumeUpload, handleSubmit, loadin
 
 
 export function StudentProfileSetup() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -950,24 +952,17 @@ export function StudentProfileSetup() {
   const handleResumeUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
       if (e.target.files && e.target.files[0]) {
           const file = e.target.files[0];
-          const formData = new FormData();
-          formData.append("file", file);
+          const formDataUpload = new FormData();
+          formDataUpload.append("file", file);
 
           try {
-              const client = axios.create({
-                  baseURL: "http://127.0.0.1:8000",
-                  headers: { 
-                      Authorization: `Bearer ${token}`,
-                      "Content-Type": "multipart/form-data"
-                  }
+              await api.post("/students/me/resume/upload", formDataUpload, {
+                  headers: { "Content-Type": "multipart/form-data" }
               });
-              await client.post("/students/me/resume/upload", formData);
-              // Ideally we would parse the resume here and pre-fill fields
-              // For now just success message or similar
-              alert("Resume uploaded successfully!");
+              toast.success("Resume uploaded successfully!");
           } catch (err) {
-              console.error("Upload failed", err);
-              alert("Failed to upload resume.");
+              const error = err as ApiError;
+              toast.error(error.message || "Failed to upload resume.");
           }
       }
   };
@@ -1006,95 +1001,76 @@ export function StudentProfileSetup() {
   };
 
   useEffect(() => {
-    if (token) {
-      const client = axios.create({
-        baseURL: "http://127.0.0.1:8000",
-        headers: { Authorization: `Bearer ${token}` }
-      });
+    const fetchData = async () => {
+      const parseList = (str: string | null) => str ? str.split(", ").filter(Boolean) : [];
+      const parseJSON = (val: any, fallback: any) => {
+        if (!val) return fallback;
+        try {
+          return typeof val === 'string' ? JSON.parse(val) : val;
+        } catch {
+          return fallback;
+        }
+      };
       
       // Fetch Profile
-      client.get("/students/me")
-        .then(res => {
-          const data = res.data;
-          const parseList = (str: string | null) => str ? str.split(", ").filter(Boolean) : [];
-          
-          setFormData(prev => ({
-            ...prev,
-            first_name: data.first_name || "",
-            last_name: data.last_name || "",
-            phone_number: data.phone_number || "",
-            current_city: data.current_city || "",
-            gender: data.gender || "",
-            languages: parseList(data.languages),
-            
-            profile_type: data.profile_type || "",
-            course: data.degree || "",
-            specialization: data.department || "",
-            college_name: data.university_name || "",
-            start_year: data.start_year ? String(data.start_year) : "",
-            end_year: data.end_year ? String(data.end_year) : "",
-            
-            interests: parseList(data.interests),
-            looking_for: parseList(data.looking_for),
-            work_mode: parseList(data.work_mode)
-          }));
-        })
-        .catch(err => {
-          console.log("No existing profile found or error fetching:", err);
-        });
+      try {
+        const profileRes = await api.get("/students/me");
+        const data = profileRes.data;
+        setFormData(prev => ({
+          ...prev,
+          first_name: data.first_name || "",
+          last_name: data.last_name || "",
+          phone_number: data.phone_number || "",
+          current_city: data.current_city || "",
+          gender: data.gender || "",
+          languages: parseList(data.languages),
+          profile_type: data.profile_type || "",
+          course: data.degree || "",
+          specialization: data.department || "",
+          college_name: data.university_name || "",
+          start_year: data.start_year ? String(data.start_year) : "",
+          end_year: data.end_year ? String(data.end_year) : "",
+          interests: parseList(data.interests),
+          looking_for: parseList(data.looking_for),
+          work_mode: parseList(data.work_mode)
+        }));
+      } catch {
+        // No existing profile, that's ok
+      }
 
       // Fetch Resume
-      client.get("/students/me/resume")
-        .then(res => {
-            const data = res.data;
-            if (data) {
-                const parseJSON = (val: any, fallback: any) => {
-                    if (!val) return fallback;
-                    try {
-                        return typeof val === 'string' ? JSON.parse(val) : val;
-                    } catch (e) {
-                        return fallback;
-                    }
-                };
-
-                setFormData(prev => ({
-                    ...prev,
-                    resume: {
-                        ...prev.resume,
-                        career_objective: data.career_objective || "",
-                        work_experience: parseJSON(data.work_experience, []),
-                        projects: parseJSON(data.projects, []),
-                        certifications: parseJSON(data.certifications, []),
-                        extra_curricular: parseJSON(data.extra_curricular, []),
-                        education_entries: parseJSON(data.education_entries, []),
-                        skills_categorized: parseJSON(data.skills_categorized, { technical: [], soft: [], languages: [] }),
-                        title: data.title || "",
-                        linkedin: data.linkedin || ""
-                    }
-                }));
+      try {
+        const resumeRes = await api.get("/students/me/resume");
+        const data = resumeRes.data;
+        if (data) {
+          setFormData(prev => ({
+            ...prev,
+            resume: {
+              ...prev.resume,
+              career_objective: data.career_objective || "",
+              work_experience: parseJSON(data.work_experience, []),
+              projects: parseJSON(data.projects, []),
+              certifications: parseJSON(data.certifications, []),
+              extra_curricular: parseJSON(data.extra_curricular, []),
+              education_entries: parseJSON(data.education_entries, []),
+              skills_categorized: parseJSON(data.skills_categorized, { technical: [], soft: [], languages: [] }),
+              title: data.title || "",
+              linkedin: data.linkedin || ""
             }
-        })
-        .catch(err => {
-            console.log("No existing resume found");
-        });
+          }));
+        }
+      } catch {
+        // No existing resume, that's ok
+      }
+    };
 
-    }
-  }, [token]);
+    fetchData();
+  }, []);
 
   const handleSubmit = async () => {
-    // Validate Step 3 (Preferences) - already validated before moving to Step 4 ideally, but double check
-    if (!formData.interests.length || !formData.looking_for.length || !formData.work_mode.length) {
-        // If we are on step 3 somehow or just final check
-    }
-
     setLoading(true);
     setError(null);
     try {
-      const client = axios.create({
-        baseURL: "http://127.0.0.1:8000",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
       // 1. Save Profile
       const profilePayload = {
         first_name: formData.first_name,
@@ -1103,60 +1079,49 @@ export function StudentProfileSetup() {
         current_city: formData.current_city,
         gender: formData.gender,
         languages: formData.languages.join(", "),
-        
         profile_type: formData.profile_type,
         university_name: formData.college_name,
         degree: formData.course,
         department: formData.specialization,
         start_year: parseInt(formData.start_year) || null,
         end_year: parseInt(formData.end_year) || null,
-        
         interests: formData.interests.join(", "),
         looking_for: formData.looking_for.join(", "),
         work_mode: formData.work_mode.join(", ")
       };
 
       try {
-        await client.post("/students/me", profilePayload);
-      } catch (err: any) {
-        if (err.response?.status === 400 || err.response?.status === 409) {
-             await client.put("/students/me", profilePayload);
-        } else {
-            // Try put if post fails for other reasons (like existing user)
-            try {
-                await client.put("/students/me", profilePayload);
-            } catch (putErr) {
-                // If both fail, throw original error
-                throw err; 
-            }
-        }
+        await api.post("/students/me", profilePayload);
+      } catch {
+        // Profile might already exist, try PUT
+        await api.put("/students/me", profilePayload);
       }
 
       // 2. Save Resume
       const resumePayload = {
-          career_objective: formData.resume.career_objective,
-          work_experience: JSON.stringify(formData.resume.work_experience),
-          projects: JSON.stringify(formData.resume.projects),
-          certifications: JSON.stringify(formData.resume.certifications),
-          extra_curricular: JSON.stringify(formData.resume.extra_curricular),
-          education_entries: JSON.stringify(formData.resume.education_entries),
-          skills_categorized: JSON.stringify(formData.resume.skills_categorized),
-          title: formData.resume.title,
-          linkedin: formData.resume.linkedin
+        career_objective: formData.resume.career_objective,
+        work_experience: JSON.stringify(formData.resume.work_experience),
+        projects: JSON.stringify(formData.resume.projects),
+        certifications: JSON.stringify(formData.resume.certifications),
+        extra_curricular: JSON.stringify(formData.resume.extra_curricular),
+        education_entries: JSON.stringify(formData.resume.education_entries),
+        skills_categorized: JSON.stringify(formData.resume.skills_categorized),
+        title: formData.resume.title,
+        linkedin: formData.resume.linkedin
       };
 
       try {
-          await client.put("/students/me/resume", resumePayload);
-      } catch (err) {
-          console.error("Failed to save resume details", err);
-          // Non-blocking error? Or should we block?
-          // For now, log it.
+        await api.put("/students/me/resume", resumePayload);
+      } catch {
+        // Resume save failed but profile saved, continue
       }
 
+      toast.success("Profile saved successfully!");
       navigate("/student");
-    } catch (err: any) {
-      console.error(err);
-      setError("Failed to save profile. Please try again.");
+    } catch (err) {
+      const error = err as ApiError;
+      toast.error(error.message || "Failed to save profile. Please try again.");
+      setError(error.message || "Failed to save profile. Please try again.");
     } finally {
       setLoading(false);
     }

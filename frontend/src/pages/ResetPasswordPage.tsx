@@ -1,134 +1,155 @@
-import { FormEvent, useState, useEffect } from "react";
-import axios from "axios";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState, FormEvent } from 'react';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useToast } from '../context/ToastContext';
+import api, { ApiError } from '../lib/api';
+import { ButtonSpinner } from '../components/LoadingSpinner';
+import { config } from '../config';
 
 export function ResetPasswordPage() {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [tokenValid, setTokenValid] = useState(true);
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token");
+  const token = searchParams.get('token');
+  const navigate = useNavigate();
+  const toast = useToast();
 
-  useEffect(() => {
-    if (!token) {
-      setTokenValid(false);
-      setError("Invalid or missing reset token");
-    }
-  }, [token]);
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: FormEvent) {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setMessage(null);
     
-    if (password !== confirmPassword) {
-      setError("Passwords do not match");
+    if (!token) {
+      toast.error('Invalid reset link. Please request a new one.');
       return;
     }
-    
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long");
-      return;
-    }
-    
-    setLoading(true);
 
+    if (password.length < 8) {
+      toast.error('Password must be at least 8 characters.');
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      toast.error('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
     try {
-      const res = await axios.post("http://127.0.0.1:8000/auth/reset-password", 
-        { token, new_password: password },
-        { headers: { "Content-Type": "application/json" } }
-      );
-      setMessage(res.data.message);
-      setTimeout(() => navigate("/"), 2000);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || "Failed to reset password");
+      await api.post(`/auth/reset-password?token=${encodeURIComponent(token)}&new_password=${encodeURIComponent(password)}`);
+      toast.success('Password reset successfully! Please login with your new password.');
+      navigate('/');
+    } catch (err) {
+      const error = err as ApiError;
+      toast.error(error.message || 'Failed to reset password. The link may have expired.');
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  if (!tokenValid) {
+  if (!token) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100">
-        <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg text-center">
-          <h1 className="text-2xl font-semibold text-slate-900 mb-2">Invalid Reset Link</h1>
-          <p className="text-sm text-slate-600 mb-6">
-            The password reset link is invalid or has expired.
-          </p>
-          <button
-            onClick={() => navigate("/forgot-password")}
-            className="rounded-md bg-slate-900 px-6 py-2 text-sm font-medium text-white hover:bg-slate-800"
-          >
-            Request New Link
-          </button>
+      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-xl p-8 shadow-lg text-center">
+            <div className="text-5xl mb-4">⚠️</div>
+            <h2 className="text-xl font-semibold text-slate-900 mb-2">Invalid Reset Link</h2>
+            <p className="text-slate-600 mb-6">
+              This password reset link is invalid or has expired.
+            </p>
+            <Link
+              to="/forgot-password"
+              className="inline-block px-6 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 
+                transition-colors font-medium"
+            >
+              Request New Link
+            </Link>
+          </div>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-100">
-      <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
-        <h1 className="text-2xl font-semibold text-slate-900 mb-2">Reset Password</h1>
-        <p className="text-sm text-slate-600 mb-6">
-          Enter your new password below.
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              New Password
-            </label>
-            <input
-              type="password"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+    <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+      <div className="w-full max-w-md">
+        {/* Logo */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-slate-900 rounded-2xl mb-4">
+            <span className="text-white font-bold text-2xl">P</span>
           </div>
+          <h1 className="text-2xl font-bold text-slate-900">{config.app.name}</h1>
+        </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Confirm New Password
-            </label>
-            <input
-              type="password"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              required
-            />
-          </div>
-
-          {(message || error) && (
-            <p className={`text-sm ${error ? "text-red-600" : "text-emerald-600"}`}>
-              {error || message}
+        <div className="bg-white rounded-xl p-8 shadow-lg">
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-semibold text-slate-900">Reset your password</h2>
+            <p className="text-sm text-slate-600 mt-1">
+              Enter your new password below.
             </p>
-          )}
+          </div>
 
-          <div className="flex gap-2">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-1">
+                New Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm 
+                  focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                required
+              />
+              <p className="mt-1 text-xs text-slate-500">Must be at least 8 characters</p>
+            </div>
+
+            <div>
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-1">
+                Confirm New Password
+              </label>
+              <input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm 
+                  focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent"
+                required
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-md bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+              className="w-full rounded-lg bg-slate-900 py-2.5 text-sm font-medium text-white 
+                hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-900 focus:ring-offset-2
+                disabled:opacity-50 disabled:cursor-not-allowed
+                transition-colors flex items-center justify-center gap-2"
             >
-              {loading ? "Resetting..." : "Reset Password"}
+              {loading ? (
+                <>
+                  <ButtonSpinner />
+                  Resetting...
+                </>
+              ) : (
+                'Reset Password'
+              )}
             </button>
-            <button
-              type="button"
-              onClick={() => navigate("/")}
-              className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+
+            <p className="text-center text-sm text-slate-600">
+              <Link to="/" className="font-medium text-slate-900 hover:underline">
+                Back to Login
+              </Link>
+            </p>
+          </form>
+        </div>
       </div>
     </main>
   );
 }
+
+export default ResetPasswordPage;

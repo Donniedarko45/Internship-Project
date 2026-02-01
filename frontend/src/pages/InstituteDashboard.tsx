@@ -1,161 +1,193 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
-import { useAuth } from "../context/AuthContext";
+import { useEffect, useState } from 'react';
+import { useToast } from '../context/ToastContext';
+import api, { ApiError } from '../lib/api';
+import { PageLoader } from '../components/LoadingSpinner';
 
-interface Internship {
-  id: number;
-  title: string;
-  company_name: string;
-  location: string;
-  mode: string;
-  duration_weeks: number;
-}
-
-interface InstituteStudentRow {
+// Types
+interface StudentInfo {
   id: number;
   name: string;
-  department: string | null;
-  year: number | null;
-  apaar_id: string | null;
+  department?: string;
+  year?: number;
+  apaar_id?: string;
   is_apaar_verified: boolean;
-  status: "Verified" | "Pending";
-  internships: Internship[];
+  status: string;
+  internships: Array<{
+    id: number;
+    title: string;
+    company_name: string;
+    location: string;
+    mode: string;
+    duration_weeks: number;
+  }>;
   total_internships: number;
 }
 
 export function InstituteDashboard() {
-  const { token, logout } = useAuth();
-  const [students, setStudents] = useState<InstituteStudentRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const toast = useToast();
+  const [students, setStudents] = useState<StudentInfo[]>([]);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
+  // Fetch students
   useEffect(() => {
-    if (!token) return;
-    
-    const client = axios.create({
-      baseURL: "http://127.0.0.1:8000",
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const fetchStudents = async () => {
+      try {
+        const response = await api.get<StudentInfo[]>('/institutes/students');
+        setStudents(response.data);
+      } catch (err) {
+        const error = err as ApiError;
+        toast.error(error.message || 'Failed to load students');
+      } finally {
+        setPageLoading(false);
+      }
+    };
 
-    client.get("/institutes/students")
-      .then((res) => {
-        setStudents(res.data);
-        if (res.data.length === 0) {
-          setMessage("No students found for your institute.");
-        }
-      })
-      .catch((err: any) => {
-        console.error("Failed to load students:", err);
-        const errorMsg = err.response?.data?.detail || "Could not load students. Please try again later.";
-        setError(errorMsg);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  }, [token]);
+    fetchStudents();
+  }, [toast]);
+
+  // Filter students based on search
+  const filteredStudents = students.filter(student =>
+    student.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    student.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    student.apaar_id?.includes(searchQuery)
+  );
+
+  // Stats
+  const verifiedCount = students.filter(s => s.is_apaar_verified).length;
+  const withInternships = students.filter(s => s.total_internships > 0).length;
+
+  if (pageLoading) {
+    return <PageLoader label="Loading dashboard..." />;
+  }
 
   return (
-    <div className="mx-auto max-w-5xl py-8 space-y-6">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Institute Dashboard</h1>
-          <p className="text-sm text-slate-600">
-            View students and their placement/verification status.
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            logout();
-            window.location.href = "/";
-          }}
-          className="inline-flex items-center rounded-md bg-white px-3 py-2 text-xs font-medium text-slate-700 border border-slate-300 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500"
-        >
-          Logout
-        </button>
-      </header>
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-slate-900">Institute Dashboard</h1>
+        <p className="text-slate-600">Monitor your students and their internship progress</p>
+      </div>
 
-      {(message || error) && (
-        <div
-          className={`rounded-md px-4 py-2 text-xs ${error ? "bg-red-50 text-red-700 border border-red-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}
-        >
-          {error || message}
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <div className="text-3xl font-bold text-slate-900">{students.length}</div>
+          <div className="text-sm text-slate-600">Total Students</div>
         </div>
-      )}
-      
-      <section className="rounded-lg bg-white p-6 shadow-sm border border-slate-100">
-        <h2 className="text-sm font-semibold text-slate-800 mb-4">
-          Students
-        </h2>
-        
-        {loading ? (
-          <div className="py-8 text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-slate-900 mb-2"></div>
-            <p className="text-slate-500 text-sm">Loading students...</p>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <div className="text-3xl font-bold text-emerald-600">{verifiedCount}</div>
+          <div className="text-sm text-slate-600">APAAR Verified</div>
+        </div>
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <div className="text-3xl font-bold text-blue-600">{withInternships}</div>
+          <div className="text-sm text-slate-600">With Internships</div>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+        <div className="max-w-md">
+          <label className="block text-sm font-medium text-slate-700 mb-1">Search Students</label>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by name, department, or APAAR ID..."
+            className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm
+              focus:outline-none focus:ring-2 focus:ring-slate-900"
+          />
+        </div>
+      </div>
+
+      {/* Students Table */}
+      <section className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="p-6 border-b border-slate-200">
+          <h2 className="text-lg font-semibold text-slate-900">
+            Students ({filteredStudents.length})
+          </h2>
+        </div>
+
+        {filteredStudents.length === 0 ? (
+          <div className="p-12 text-center">
+            <p className="text-slate-500">
+              {searchQuery ? 'No students found matching your search.' : 'No students registered yet.'}
+            </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {students.map((s) => (
-              <div key={s.id} className="border border-slate-200 rounded-lg overflow-hidden">
-                <div className="bg-slate-50 px-4 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="text-sm font-medium text-slate-900">{s.name}</h3>
-                    <span
-                      className={
-                        s.status === "Verified"
-                          ? "inline-flex rounded-full bg-sky-50 px-3 py-1 text-[11px] font-medium text-sky-700 border border-sky-200"
-                          : "inline-flex rounded-full bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600 border border-slate-200"
-                      }
-                    >
-                      {s.status}
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="p-4 space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                    <div>
-                      <span className="text-slate-500 block mb-1">Department</span>
-                      <span className="text-slate-800 font-medium">{s.department ?? "-"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block mb-1">Year</span>
-                      <span className="text-slate-800 font-medium">{s.year ?? "-"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block mb-1">APAAR ID</span>
-                      <span className="text-slate-800 font-medium">{s.apaar_id ?? "Not provided"}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block mb-1">Internships</span>
-                      <span className="text-slate-800 font-medium">{s.total_internships}</span>
-                    </div>
-                  </div>
-                  
-                  {s.total_internships > 0 && (
-                    <div>
-                      <h4 className="text-xs font-semibold text-slate-700 mb-2">Current Internships</h4>
-                      <div className="space-y-2">
-                        {s.internships.map((internship) => (
-                          <div key={internship.id} className="border-l-2 border-slate-300 pl-3 py-1">
-                            <div className="text-xs font-medium text-slate-900">{internship.title}</div>
-                            <div className="text-xs text-slate-600">{internship.company_name}</div>
-                            <div className="text-xs text-slate-500 mt-1">
-                              {internship.location} • {internship.mode} • {internship.duration_weeks} weeks
-                            </div>
-                          </div>
-                        ))}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Student
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Department
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Year
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    APAAR Status
+                  </th>
+                  <th className="text-left px-6 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                    Internships
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {filteredStudents.map((student) => (
+                  <tr key={student.id} className="hover:bg-slate-50">
+                    <td className="px-6 py-4">
+                      <div>
+                        <div className="font-medium text-slate-900">{student.name}</div>
+                        {student.apaar_id && (
+                          <div className="text-xs text-slate-500">APAAR: {student.apaar_id}</div>
+                        )}
                       </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-            {students.length === 0 && !message && !error && (
-              <div className="py-8 text-center">
-                <p className="text-slate-500 text-sm">No students found.</p>
-              </div>
-            )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {student.department || '-'}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-slate-600">
+                      {student.year ? `Year ${student.year}` : '-'}
+                    </td>
+                    <td className="px-6 py-4">
+                      <span
+                        className={`px-2 py-1 text-xs font-medium rounded-full
+                          ${student.is_apaar_verified
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-amber-50 text-amber-700 border border-amber-200'
+                          }`}
+                      >
+                        {student.is_apaar_verified ? 'Verified' : 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {student.total_internships > 0 ? (
+                        <div>
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                            {student.total_internships} internship{student.total_internships !== 1 ? 's' : ''}
+                          </span>
+                          {student.internships.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              {student.internships.slice(0, 2).map((int) => (
+                                <div key={int.id} className="text-xs text-slate-600">
+                                  • {int.title} at {int.company_name}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-slate-400">None</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
@@ -163,3 +195,4 @@ export function InstituteDashboard() {
   );
 }
 
+export default InstituteDashboard;

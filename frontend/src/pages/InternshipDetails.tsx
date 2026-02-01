@@ -1,188 +1,205 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import axios from "axios";
-import { useAuth } from "../context/AuthContext";
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useToast } from '../context/ToastContext';
+import api, { ApiError } from '../lib/api';
+import { PageLoader, ButtonSpinner } from '../components/LoadingSpinner';
 
-interface InternshipDetails {
+interface InternshipDetail {
   id: number;
   title: string;
-  description: string | null;
+  description: string;
   location: string;
   mode: string;
   duration_weeks: number;
-  employer: {
+  employer?: {
     company_name: string;
-    contact_number: string;
+    contact_number?: string;
   };
 }
 
+interface Application {
+  id: number;
+  internship_id: number;
+  status: string;
+}
+
 export function InternshipDetails() {
-  const { token } = useAuth();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [internship, setInternship] = useState<InternshipDetails | null>(null);
+  const toast = useToast();
+
+  const [internship, setInternship] = useState<InternshipDetail | null>(null);
+  const [applications, setApplications] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
-  const [applyMessage, setApplyMessage] = useState<string | null>(null);
-  const [applyError, setApplyError] = useState<string | null>(null);
-  const [alreadyApplied, setAlreadyApplied] = useState(false);
-
-  const internshipId = parseInt(id || "", 10);
-
-  function createClient() {
-    return axios.create({
-      baseURL: "http://127.0.0.1:8000",
-      headers: token ? { Authorization: `Bearer ${token}` } : {}
-    });
-  }
 
   useEffect(() => {
-    if (!token || isNaN(internshipId)) {
-      navigate("/");
-      return;
-    }
+    const fetchData = async () => {
+      if (!id) return;
+      
+      try {
+        // Fetch internship details
+        const response = await api.get<InternshipDetail>(`/students/internships/${id}`);
+        setInternship(response.data);
 
-    const client = createClient();
-    
-    // Fetch internship details
-    client.get(`/students/internships/${internshipId}`)
-      .then((res) => {
-        setInternship(res.data);
+        // Fetch user's applications to check if already applied
+        const appsRes = await api.get<Application[]>('/students/my-applications');
+        setApplications(appsRes.data);
+      } catch (err) {
+        const error = err as ApiError;
+        toast.error(error.message || 'Failed to load internship details');
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        setError("Failed to load internship details");
-        setLoading(false);
-        console.error(err);
-      });
-    
-    // Check if already applied
-    client.get("/students/my-applications")
-      .then((res) => {
-        const applications = res.data;
-        const hasApplied = applications.some((app: any) => app.internship_id === internshipId);
-        setAlreadyApplied(hasApplied);
-      })
-      .catch((err) => {
-        console.error("Failed to check applications:", err);
-      });
-  }, [token, internshipId, navigate]);
+      }
+    };
+
+    fetchData();
+  }, [id, toast]);
+
+  const hasApplied = applications.some(app => app.internship_id === parseInt(id || '0'));
+  const applicationStatus = applications.find(app => app.internship_id === parseInt(id || '0'))?.status;
 
   const handleApply = async () => {
-    if (!token || isNaN(internshipId)) return;
+    if (!id) return;
     
     setApplying(true);
-    setApplyMessage(null);
-    setApplyError(null);
-    
     try {
-      const client = createClient();
-      await client.post("/students/apply", { internship_id: internshipId });
-      setApplyMessage("Application submitted successfully!");
-      setAlreadyApplied(true);
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail;
-      setApplyError(detail || "Could not submit application");
+      await api.post('/students/apply', { internship_id: parseInt(id) });
+      
+      // Record feedback
+      await api.post('/students/feedback', { internship_id: parseInt(id), action: 'apply' }).catch(() => {});
+      
+      toast.success('Application submitted successfully!');
+      
+      // Refresh applications
+      const appsRes = await api.get<Application[]>('/students/my-applications');
+      setApplications(appsRes.data);
+    } catch (err) {
+      const error = err as ApiError;
+      toast.error(error.message || 'Failed to submit application');
     } finally {
       setApplying(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="mx-auto max-w-5xl py-8">
-        <div className="flex justify-center items-center h-64">
-          <p className="text-slate-500">Loading internship details...</p>
-        </div>
-      </div>
-    );
+    return <PageLoader label="Loading internship details..." />;
   }
 
-  if (error || !internship) {
+  if (!internship) {
     return (
-      <div className="mx-auto max-w-5xl py-8">
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <h2 className="text-lg font-medium text-red-800">Error</h2>
-          <p className="mt-1 text-sm text-red-700">{error || "Internship not found"}</p>
-          <button 
-            onClick={() => navigate("/student")}
-            className="mt-3 inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-          >
-            Back to Dashboard
-          </button>
-        </div>
+      <div className="text-center py-12">
+        <h2 className="text-xl font-semibold text-slate-900 mb-2">Internship Not Found</h2>
+        <p className="text-slate-600 mb-4">The internship you're looking for doesn't exist.</p>
+        <button
+          onClick={() => navigate('/student')}
+          className="text-blue-600 hover:underline font-medium"
+        >
+          Back to Dashboard
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-5xl py-8 space-y-6">
-      <button 
-        onClick={() => navigate("/student")}
-        className="inline-flex items-center px-3 py-2 border border-slate-300 text-sm font-medium rounded-md shadow-sm text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500"
+    <div className="max-w-3xl mx-auto">
+      {/* Back Button */}
+      <button
+        onClick={() => navigate(-1)}
+        className="flex items-center gap-2 text-slate-600 hover:text-slate-900 mb-6"
       >
-        ← Back to Dashboard
+        ← Back
       </button>
-      
-      <div className="bg-white rounded-lg shadow-sm border border-slate-100 overflow-hidden">
-        <div className="px-6 py-8">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+
+      {/* Main Card */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-slate-200">
+          <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-3xl font-bold text-slate-900">{internship.title}</h1>
-              <div className="mt-2 text-lg text-slate-700">{internship.employer.company_name}</div>
+              <h1 className="text-2xl font-bold text-slate-900 mb-2">{internship.title}</h1>
+              {internship.employer && (
+                <p className="text-lg text-slate-600">{internship.employer.company_name}</p>
+              )}
             </div>
-            
-            <div className="flex flex-wrap gap-2">
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-50 text-blue-800 border border-blue-200">
-                {internship.mode}
+            {hasApplied ? (
+              <span
+                className={`px-3 py-1.5 text-sm font-medium rounded-full capitalize
+                  ${applicationStatus === 'pending'
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                    : applicationStatus === 'accepted'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : applicationStatus === 'shortlisted'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                    : 'bg-red-50 text-red-700 border border-red-200'
+                  }`}
+              >
+                {applicationStatus}
               </span>
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-50 text-green-800 border border-green-200">
-                {internship.location}
-              </span>
-              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-50 text-purple-800 border border-purple-200">
-                {internship.duration_weeks} weeks
-              </span>
+            ) : null}
+          </div>
+
+          {/* Tags */}
+          <div className="flex flex-wrap gap-2 mt-4">
+            <span className="px-3 py-1 text-sm rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              {internship.mode}
+            </span>
+            <span className="px-3 py-1 text-sm rounded-full bg-green-50 text-green-700 border border-green-200">
+              {internship.location}
+            </span>
+            <span className="px-3 py-1 text-sm rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+              {internship.duration_weeks} weeks
+            </span>
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="p-6">
+          <h2 className="text-lg font-semibold text-slate-900 mb-3">About the Role</h2>
+          <div className="prose prose-slate prose-sm max-w-none">
+            <p className="text-slate-600 whitespace-pre-wrap">{internship.description}</p>
+          </div>
+        </div>
+
+        {/* Company Info */}
+        {internship.employer && (
+          <div className="p-6 border-t border-slate-200 bg-slate-50">
+            <h2 className="text-lg font-semibold text-slate-900 mb-3">Company Information</h2>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className="text-slate-500">Company Name</span>
+                <p className="font-medium text-slate-900">{internship.employer.company_name}</p>
+              </div>
+              {internship.employer.contact_number && (
+                <div>
+                  <span className="text-slate-500">Contact</span>
+                  <p className="font-medium text-slate-900">{internship.employer.contact_number}</p>
+                </div>
+              )}
             </div>
           </div>
-          
-          <div className="prose prose-sm max-w-none text-slate-700">
-            <h2 className="text-xl font-semibold text-slate-900 mt-8 mb-4">About the Internship</h2>
-            <p>{internship.description || "No description available"}</p>
-            
-            <h2 className="text-xl font-semibold text-slate-900 mt-8 mb-4">Company Details</h2>
-            <ul className="space-y-2">
-              <li className="flex items-start gap-2">
-                <span className="font-medium text-slate-900">Company Name:</span>
-                <span>{internship.employer.company_name}</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="font-medium text-slate-900">Contact Number:</span>
-                <span>{internship.employer.contact_number || "Not provided"}</span>
-              </li>
-            </ul>
-          </div>
-          
-          <div className="mt-10">
-            <button
-              onClick={handleApply}
-              disabled={alreadyApplied || applying}
-              className={`inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2 ${alreadyApplied 
-                ? "bg-gray-500 cursor-not-allowed" 
-                : "bg-slate-900 hover:bg-slate-800 focus:ring-slate-500"}`}
-            >
-              {applying ? "Applying..." : alreadyApplied ? "Already Applied" : "Apply Now"}
-            </button>
-            
-            {applyMessage && (
-              <p className="mt-3 text-sm text-green-600">{applyMessage}</p>
-            )}
-            {applyError && (
-              <p className="mt-3 text-sm text-red-600">{applyError}</p>
-            )}
-          </div>
+        )}
+
+        {/* Apply Button */}
+        <div className="p-6 border-t border-slate-200">
+          <button
+            onClick={handleApply}
+            disabled={hasApplied || applying}
+            className={`w-full py-3 rounded-lg font-medium transition-colors
+              flex items-center justify-center gap-2
+              ${hasApplied
+                ? 'bg-slate-100 text-slate-500 cursor-not-allowed'
+                : 'bg-slate-900 text-white hover:bg-slate-800'
+              }
+              disabled:opacity-60`}
+          >
+            {applying && <ButtonSpinner />}
+            {hasApplied ? 'Already Applied' : applying ? 'Submitting...' : 'Apply Now'}
+          </button>
         </div>
       </div>
     </div>
   );
 }
+
+export default InternshipDetails;
